@@ -15,24 +15,76 @@ frontend/  React + TypeScript + Vite
 
 ## Puesta en marcha
 
-Requisitos: Python 3.11+ y Node 20+.
+Requisitos: **Python 3.11+** y **Node.js 20+**.
+
+### 1. Descargar el código
 
 ```bash
-# Backend
-cd backend
-python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-uvicorn app.main:create_app --factory --reload --port 8000
-
-# Frontend (en otra terminal), con recarga en caliente en http://localhost:5173
-cd frontend
-npm install
-npm run dev
+git clone https://github.com/thegeox/cataloger.git
+cd cataloger
+git checkout claude/image-processing-metadata-7x95fh
 ```
 
-Para servir todo desde un único puerto: `cd frontend && npm run build`. El backend sirve `frontend/dist` en http://localhost:8000.
+### 2. Backend
+
+macOS / Linux:
+
+```bash
+cd backend
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+Windows (PowerShell):
+
+```powershell
+cd backend
+py -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+```
+
+### 3. Frontend
+
+En otra terminal:
+
+```bash
+cd frontend
+npm install
+npm run build
+```
+
+### 4. Arrancar
+
+En la terminal del backend, con el entorno virtual activado:
+
+```bash
+uvicorn app.main:create_app --factory --port 8000
+```
+
+Abre **http://localhost:8000**.
+
+> Para desarrollar el frontend con recarga en caliente, deja el backend corriendo y ejecuta `npm run dev` en `frontend/`; luego abre http://localhost:5173.
 
 Tests del backend: `cd backend && pytest`.
+
+### 5. Probar con el catálogo de ejemplo
+
+`examples/catalogo/` incluye fotos de muestra:
+- `calzado/`: con esquema y algunos valores ya cargados.
+- `muebles/`: con la subcarpeta `sillas/`, que hereda el esquema, quita *medidas* y añade *altura de asiento*.
+- `varios/`: sin esquema, para crearlo desde la app.
+
+La app **escribe** en esa carpeta (`catalog.data.json`, `catalog.schema.json`). Si quieres conservar el ejemplo intacto, cópialo antes a otro lugar y usa la copia.
+
+1. **Fuentes** → tipo *Carpeta local* → ruta absoluta de la carpeta, p. ej. `/Users/ana/cataloger/examples/catalogo` o `C:\Users\ana\cataloger\examples\catalogo` → *Agregar y sincronizar*.
+2. **Carpetas y esquemas**: revisa la herencia en `muebles/sillas` y crea el esquema de `varios`.
+3. **Imágenes**: *Importar CSV* con `examples/metadata-ejemplo.csv` y completa el resto a mano.
+4. **Plantillas** → crea una desde un modelo e inserta campos como `{{modelo}}` o `{{precio|money:$}}`.
+5. **Exportar** → catálogo PDF o ZIP de imágenes.
+
+Los datos internos de la app (caché y base SQLite) se guardan en `backend/data/`. Se puede borrar en cualquier momento: la metadata real está en las carpetas.
 
 ### Configuración (variables de entorno)
 

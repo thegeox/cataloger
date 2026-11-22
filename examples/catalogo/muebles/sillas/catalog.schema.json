@@ -1,0 +1,13 @@
+{
+  "quitar": [
+    "medidas"
+  ],
+  "campos": [
+    {
+      "clave": "altura_asiento",
+      "etiqueta": "Altura de asiento (cm)",
+      "tipo": "numero",
+      "obligatorio": true
+    }
+  ]
+}
