@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, api, downloadBlob, thumbUrl } from "../api";
 import type { Shared } from "../App";
-import type { ImageItem, Meta } from "../types";
+import type { FieldDef, ImageItem, Meta } from "../types";
 import MetaForm from "./MetaForm";
 
 interface ImportReport {
@@ -13,10 +13,12 @@ interface ImportReport {
 
 const PAGE = 120;
 
-export default function ImagesPage({ sources, fields, selection, setSelection, notify, go }: Shared) {
+export default function ImagesPage({ sources, folders, selection, setSelection, notify, go, focusFolder, setFocusFolder }: Shared) {
   const [items, setItems] = useState<ImageItem[]>([]);
   const [total, setTotal] = useState(0);
-  const [sourceId, setSourceId] = useState<number | "">("");
+  const initialFolder = folders.find((f) => f.id === focusFolder);
+  const [sourceId, setSourceId] = useState<number | "">(initialFolder?.source_id ?? "");
+  const [folderPath, setFolderPath] = useState<string | null>(initialFolder ? initialFolder.path : null);
   const [q, setQ] = useState("");
   const [incomplete, setIncomplete] = useState(false);
   const [limit, setLimit] = useState(PAGE);
@@ -31,12 +33,13 @@ export default function ImagesPage({ sources, fields, selection, setSelection, n
   const load = useCallback(async () => {
     const params = new URLSearchParams({ limit: String(limit) });
     if (sourceId) params.set("source_id", String(sourceId));
+    if (sourceId && folderPath !== null) params.set("folder", folderPath);
     if (q) params.set("q", q);
     if (incomplete) params.set("incomplete", "true");
     const r = await api.get<{ total: number; items: ImageItem[] }>(`/api/images?${params}`);
     setItems(r.items);
     setTotal(r.total);
-  }, [sourceId, q, incomplete, limit]);
+  }, [sourceId, folderPath, q, incomplete, limit]);
 
   useEffect(() => {
     const t = setTimeout(() => load().catch((e) => notify(e.message, "error")), 200);
@@ -44,6 +47,20 @@ export default function ImagesPage({ sources, fields, selection, setSelection, n
   }, [load, notify]);
 
   const selected = useMemo(() => new Set(selection), [selection]);
+  const folderOf = useCallback(
+    (img: ImageItem) => folders.find((f) => f.source_id === img.source_id && f.path === img.folder_path),
+    [folders],
+  );
+  const fieldsOf = useCallback((img: ImageItem): FieldDef[] => folderOf(img)?.fields ?? [], [folderOf]);
+  // bulk edit offers the union of the fields of the selected photos' folders;
+  // the server applies each value only where the folder defines that field
+  const bulkFields = useMemo(() => {
+    const out: FieldDef[] = [];
+    for (const img of items.filter((i) => selected.has(i.id)))
+      for (const f of fieldsOf(img)) if (!out.some((o) => o.key === f.key)) out.push(f);
+    return out;
+  }, [items, selected, fieldsOf]);
+  const sourceFolders = folders.filter((f) => f.source_id === sourceId);
   const bulk = selection.length > 1;
 
   useEffect(() => {
@@ -114,6 +131,7 @@ export default function ImagesPage({ sources, fields, selection, setSelection, n
     const fd = new FormData();
     fd.append("file", file);
     if (sourceId) fd.append("source_id", String(sourceId));
+    if (sourceId && folderPath !== null) fd.append("folder", folderPath);
     try {
       const r = await api.post<ImportReport>("/api/images/import-csv", fd);
       setReport(r);
@@ -126,12 +144,18 @@ export default function ImagesPage({ sources, fields, selection, setSelection, n
   }
 
   async function exportCsv() {
-    const blob = await api.get<Blob>(`/api/images/export.csv${sourceId ? `?source_id=${sourceId}` : ""}`);
+    const params = new URLSearchParams();
+    if (sourceId) params.set("source_id", String(sourceId));
+    if (sourceId && folderPath !== null) params.set("folder", folderPath);
+    const blob = await api.get<Blob>(`/api/images/export.csv?${params}`);
     downloadBlob(blob, "metadata.csv");
   }
 
   async function selectAll() {
-    const ids = await api.get<number[]>(`/api/images/ids${sourceId ? `?source_id=${sourceId}` : ""}`);
+    const params = new URLSearchParams();
+    if (sourceId) params.set("source_id", String(sourceId));
+    if (sourceId && folderPath !== null) params.set("folder", folderPath);
+    const ids = await api.get<number[]>(`/api/images/ids?${params}`);
     setSelection(ids);
   }
 
@@ -141,7 +165,13 @@ export default function ImagesPage({ sources, fields, selection, setSelection, n
     <div className="page split">
       <section className="split-main">
         <div className="toolbar">
-          <select value={sourceId} onChange={(e) => setSourceId(e.target.value ? Number(e.target.value) : "")}>
+          <select
+            value={sourceId}
+            onChange={(e) => {
+              setSourceId(e.target.value ? Number(e.target.value) : "");
+              setFolderPath(null);
+            }}
+          >
             <option value="">Todas las fuentes</option>
             {sources.map((s) => (
               <option key={s.id} value={s.id}>
@@ -149,10 +179,21 @@ export default function ImagesPage({ sources, fields, selection, setSelection, n
               </option>
             ))}
           </select>
+          {sourceId !== "" && (
+            <select value={folderPath ?? "__all"} onChange={(e) => setFolderPath(e.target.value === "__all" ? null : e.target.value)}>
+              <option value="__all">Todas las carpetas</option>
+              {sourceFolders.map((f) => (
+                <option key={f.id} value={f.path}>
+                  {"\u00a0\u00a0".repeat(f.path ? f.path.split("/").length : 0)}
+                  {f.name || "(raíz)"} {f.category ? `· ${f.category}` : ""}
+                </option>
+              ))}
+            </select>
+          )}
           <input className="grow" placeholder="Buscar por nombre o valor de metadata…" value={q} onChange={(e) => setQ(e.target.value)} />
           <label className="check">
             <input type="checkbox" checked={incomplete} onChange={(e) => setIncomplete(e.target.checked)} />
-            Solo incompletas
+            Solo pendientes
           </label>
           <button className="secondary" onClick={selectAll}>
             Seleccionar todo
@@ -196,10 +237,17 @@ export default function ImagesPage({ sources, fields, selection, setSelection, n
             >
               <img src={thumbUrl(img.id)} loading="lazy" alt={img.name} />
               <figcaption>
-                <span className="ellipsis" title={img.name}>
-                  {img.name}
+                <span className="caption-text">
+                  <span className="ellipsis" title={img.name}>
+                    {img.name}
+                  </span>
+                  <span className="ellipsis muted folder-label" title={img.folder_path}>
+                    {img.category || img.folder_path || "(raíz)"}
+                  </span>
                 </span>
-                {img.missing && img.missing.length > 0 ? (
+                {!img.has_schema ? (
+                  <span className="dot none" title="La carpeta no tiene esquema" />
+                ) : img.missing && img.missing.length > 0 ? (
                   <span className="dot warn" title={`Falta: ${img.missing.join(", ")}`} />
                 ) : (
                   <span className="dot ok" title="Metadata completa" />
@@ -226,9 +274,11 @@ export default function ImagesPage({ sources, fields, selection, setSelection, n
         {bulk ? (
           <>
             <h3>Edición en lote · {selection.length} imágenes</h3>
-            <p className="muted small">Solo se aplican los campos que modifiques (resaltados).</p>
+            <p className="muted small">
+              Solo se aplican los campos que modifiques (resaltados), y a cada foto solo los campos que su carpeta define.
+            </p>
             <MetaForm
-              fields={fields}
+              fields={bulkFields}
               values={draft}
               errors={errors}
               bulk
@@ -256,13 +306,33 @@ export default function ImagesPage({ sources, fields, selection, setSelection, n
               {sourceName(active.source_id)} · {active.external_id}
               {active.width ? ` · ${active.width}×${active.height}px` : ""}
             </p>
-            <MetaForm fields={fields} values={draft} errors={errors} onChange={setDraft} />
-            <div className="row gap">
-              <button onClick={saveOne}>Guardar y siguiente</button>
-              <button className="secondary" onClick={() => open(active)}>
-                Descartar
-              </button>
-            </div>
+            {fieldsOf(active).length > 0 ? (
+              <>
+                <p className="muted small">
+                  Campos de <strong>{folderOf(active)?.category || active.folder_path || "(raíz)"}</strong> · se guardan en{" "}
+                  <code>{active.folder_path ? `${active.folder_path}/` : ""}catalog.data.json</code>
+                </p>
+                <MetaForm fields={fieldsOf(active)} values={draft} errors={errors} onChange={setDraft} />
+                <div className="row gap">
+                  <button onClick={saveOne}>Guardar y siguiente</button>
+                  <button className="secondary" onClick={() => open(active)}>
+                    Descartar
+                  </button>
+                </div>
+              </>
+            ) : (
+              <div className="warn-box">
+                La carpeta “{active.folder_path || "(raíz)"}” no tiene <code>catalog.schema.json</code>, así que no hay campos que capturar.
+                <button
+                  onClick={() => {
+                    setFocusFolder(folderOf(active)?.id ?? null);
+                    go("folders");
+                  }}
+                >
+                  Crear esquema de la carpeta
+                </button>
+              </div>
+            )}
           </>
         ) : (
           <p className="muted">Selecciona una imagen para editar su metadata.</p>

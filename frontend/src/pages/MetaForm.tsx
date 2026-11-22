@@ -1,7 +1,7 @@
-import type { Meta, MetadataField } from "../types";
+import type { FieldDef, Meta } from "../types";
 
 interface Props {
-  fields: MetadataField[];
+  fields: FieldDef[];
   values: Meta;
   errors?: Record<string, string>;
   onChange: (values: Meta) => void;
@@ -63,7 +63,7 @@ export default function MetaForm({ fields, values, errors = {}, onChange, bulk, 
           </label>
         );
       })}
-      {fields.length === 0 && <p className="muted">Define primero los campos en “Campos de metadata”.</p>}
+
     </div>
   );
 }

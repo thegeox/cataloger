@@ -49,15 +49,19 @@ class OAuthConnector(Connector):
             self.config["refresh_token"] = payload["refresh_token"]
         self.config["expires_at"] = time.time() + int(payload.get("expires_in", 3600))
 
-    def _request(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
+    def _request(self, method: str, url: str, *, allow_404: bool = False, headers: dict | None = None, **kwargs: Any) -> httpx.Response:
         if not self.config.get("access_token") or self._token_expired():
             self._refresh()
         for attempt in range(2):
-            headers = {"Authorization": f"Bearer {self.config['access_token']}"}
-            resp = self._client.request(method, url, headers=headers, **kwargs)
+            all_headers = {**(headers or {}), "Authorization": f"Bearer {self.config['access_token']}"}
+            resp = self._client.request(method, url, headers=all_headers, **kwargs)
             if resp.status_code == 401 and attempt == 0 and self.config.get("refresh_token"):
                 self._refresh()
                 continue
+            if resp.status_code == 404 and allow_404:
+                return resp
+            if resp.status_code == 403 and method != "GET":
+                raise ConnectorError("Sin permiso de escritura en la carpeta: el token necesita alcance de escritura")
             if resp.status_code >= 400:
                 raise ConnectorError(f"Error {resp.status_code} del proveedor: {resp.text[:200]}")
             return resp

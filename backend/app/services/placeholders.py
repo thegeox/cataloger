@@ -7,6 +7,7 @@
     {{campo|default:Sin dato}}   fallback when empty
     {{fecha|date:%d/%m/%Y}}      reformat ISO dates
     {{_name}} {{_stem}} {{_index}} {{_count}} {{_width}} {{_height}}   built-ins
+    {{_folder}} {{_path}} {{_category}}                                  folder name, path, schema category
 """
 from __future__ import annotations
 
@@ -76,10 +77,16 @@ def find_placeholders(template: str) -> list[str]:
     return [m.group(1).strip() for m in PLACEHOLDER.finditer(template)]
 
 
-def build_context(image: Any, index: int = 1, count: int = 1) -> dict[str, Any]:
+def build_context(
+    image: Any, index: int = 1, count: int = 1, meta: dict[str, Any] | None = None, category: str = ""
+) -> dict[str, Any]:
     stem = image.name.rsplit(".", 1)[0]
+    folder = getattr(image, "folder_path", "") or ""
     return {
-        **(image.meta or {}),
+        **(image.meta if meta is None else meta),
+        "_folder": folder.rsplit("/", 1)[-1],
+        "_path": folder,
+        "_category": category,
         "_name": image.name,
         "_stem": stem,
         "_index": index,

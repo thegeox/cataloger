@@ -11,7 +11,7 @@ from PIL import UnidentifiedImageError
 from .config import Settings
 from .connectors import ConnectorError
 from .db import make_engine
-from .routers import fields, images, sources, templates
+from .routers import folders, images, sources, templates
 from .services.metadata import MetadataValidationError
 
 FRONTEND_DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
@@ -42,7 +42,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def _bad_image(_: Request, exc: UnidentifiedImageError):
         return JSONResponse({"detail": f"No se pudo leer la imagen: {exc}"}, status_code=422)
 
-    for r in (sources.router, fields.router, images.router, templates.router):
+    for r in (sources.router, folders.router, images.router, templates.router):
         app.include_router(r)
 
     @app.get("/api/health")

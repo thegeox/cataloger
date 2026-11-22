@@ -180,3 +180,30 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   .editor-body { grid-template-columns: 1fr; }
   .stage { min-height: 60vh; }
 }
+
+/* ---------------------------------------------------------------- folders */
+.page.split.split-left { grid-template-columns: 300px minmax(0, 1fr); }
+.page.split.split-left > .split-side { order: -1; }
+.tree h3 { margin-top: 0; }
+.tree-source { margin-bottom: 12px; }
+.tree-source-name { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 8px 0 4px; }
+.tree-item { display: flex; align-items: center; gap: 6px; width: 100%; background: none; border: none; color: var(--text); font-weight: 400; padding: 6px 8px; border-radius: 6px; text-align: left; }
+.tree-item:hover { background: var(--bg); }
+.tree-item.active { background: var(--accent-soft); color: var(--accent); }
+.tree-icon { color: var(--muted); width: 14px; }
+.tag { font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 99px; white-space: nowrap; }
+.tag.warn { background: #fff1cc; color: #7a5300; }
+.tag.error { background: #fde2e2; color: var(--danger); }
+.table.compact { margin-top: 4px; }
+.table.compact td { padding: 6px 8px; }
+.table tr.inherited td { color: var(--muted); }
+.table tr.struck td:not(:last-child) { text-decoration: line-through; color: var(--muted); }
+.field-editor { border: 1px solid var(--accent); border-radius: var(--radius); padding: 12px; background: var(--accent-soft); }
+.save-row { border-top: 1px solid var(--border); padding-top: 12px; }
+.json { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 12px; font-size: 12px; overflow: auto; max-height: 360px; margin: 0; }
+.error-box { padding: 10px; border-radius: 6px; background: #fde2e2; color: var(--danger); font-size: 13px; margin: 8px 0; }
+.warn-box button { margin-top: 8px; }
+.caption-text { display: grid; min-width: 0; }
+.folder-label { font-size: 11px; }
+.dot.none { background: var(--border); }
+@media (max-width: 900px) { .page.split.split-left { grid-template-columns: 1fr; } }

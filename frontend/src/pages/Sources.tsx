@@ -8,9 +8,19 @@ interface SyncResult {
   updated: number;
   removed: number;
   total: number;
+  folders: number;
+  without_schema: number;
+  errors: string[];
 }
 
-export default function SourcesPage({ sources, reloadSources, notify, go }: Shared) {
+function syncMessage(r: SyncResult): string {
+  let msg = `${r.total} fotos en ${r.folders} carpetas (+${r.added} nuevas, ${r.updated} cambiadas, -${r.removed})`;
+  if (r.without_schema) msg += ` · ${r.without_schema} carpetas sin esquema`;
+  if (r.errors.length) msg += ` · ${r.errors.length} archivos con errores: ${r.errors[0]}`;
+  return msg;
+}
+
+export default function SourcesPage({ sources, reloadSources, reloadFolders, notify, go }: Shared) {
   const [connectors, setConnectors] = useState<ConnectorInfo[]>([]);
   const [kind, setKind] = useState("local");
   const [name, setName] = useState("");
@@ -32,10 +42,11 @@ export default function SourcesPage({ sources, reloadSources, notify, go }: Shar
     try {
       const src = await api.post<Source>("/api/sources", { name: name || label(kind), kind, config });
       const r = await api.post<SyncResult>(`/api/sources/${src.id}/sync`);
-      notify(`Fuente creada: ${r.total} imágenes encontradas`);
+      notify(`Fuente creada: ${syncMessage(r)}`, r.errors.length ? "error" : "ok");
       setName("");
       setConfig({ recursive: true });
-      await reloadSources();
+      await Promise.all([reloadSources(), reloadFolders()]);
+      go("folders");
     } catch (err) {
       notify((err as Error).message, "error");
       await reloadSources();
@@ -48,8 +59,8 @@ export default function SourcesPage({ sources, reloadSources, notify, go }: Shar
     setBusy(s.id);
     try {
       const r = await api.post<SyncResult>(`/api/sources/${s.id}/sync`);
-      notify(`Sincronizado: +${r.added} nuevas, ${r.updated} actualizadas, -${r.removed} eliminadas`);
-      await reloadSources();
+      notify(syncMessage(r), r.errors.length ? "error" : "ok");
+      await Promise.all([reloadSources(), reloadFolders()]);
     } catch (err) {
       notify((err as Error).message, "error");
     } finally {
@@ -60,7 +71,7 @@ export default function SourcesPage({ sources, reloadSources, notify, go }: Shar
   async function remove(s: Source) {
     if (!confirm(`¿Eliminar la fuente "${s.name}" y la metadata de sus ${s.image_count} imágenes del catálogo? (Los archivos no se borran)`)) return;
     await api.del(`/api/sources/${s.id}`);
-    await reloadSources();
+    await Promise.all([reloadSources(), reloadFolders()]);
   }
 
   async function upload(files: FileList | null) {
@@ -71,7 +82,7 @@ export default function SourcesPage({ sources, reloadSources, notify, go }: Shar
     try {
       const r = await api.post<{ saved: string[] }>(`/api/sources/${uploadTarget}/upload`, fd);
       notify(`${r.saved.length} imágenes subidas`);
-      await reloadSources();
+      await Promise.all([reloadSources(), reloadFolders()]);
     } catch (err) {
       notify((err as Error).message, "error");
     } finally {
@@ -84,8 +95,9 @@ export default function SourcesPage({ sources, reloadSources, notify, go }: Shar
     <div className="page">
       <h1>Fuentes de imágenes</h1>
       <p className="muted">
-        Conecta los repositorios de donde vienen las imágenes. Al sincronizar, el catálogo refleja los archivos de la
-        fuente sin perder la metadata ya cargada.
+        Conecta los repositorios de imágenes. Cada carpeta define qué metadata se pide para sus fotos con un archivo{" "}
+        <code>catalog.schema.json</code> (las subcarpetas lo heredan), y los valores capturados se guardan en{" "}
+        <code>catalog.data.json</code> junto a las fotos.
       </p>
 
       <div className="cards">
@@ -116,8 +128,8 @@ export default function SourcesPage({ sources, reloadSources, notify, go }: Shar
                   Subir imágenes
                 </button>
               )}
-              <button className="secondary" onClick={() => go("images")}>
-                Ver
+              <button className="secondary" onClick={() => go("folders")}>
+                Carpetas
               </button>
               <button className="danger link" onClick={() => remove(s)}>
                 Eliminar
@@ -178,8 +190,9 @@ export default function SourcesPage({ sources, reloadSources, notify, go }: Shar
         )}
         {kind !== "local" && (
           <p className="hint">
-            Pega un access token OAuth con permiso de lectura. Si además configuras el client id/secret en el servidor y
-            un refresh token, el token se renovará automáticamente.
+            Pega un access token OAuth con permiso de lectura y escritura (la app escribe los archivos catalog.*.json en
+            las carpetas). Si además configuras el client id/secret en el servidor y un refresh token, el token se
+            renovará automáticamente.
           </p>
         )}
         <div>

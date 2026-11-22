@@ -17,6 +17,7 @@ class RemoteFile:
     name: str
     mime_type: str
     revision: str = ""
+    folder: str = ""  # folder path relative to the source root ("" = root, "/" separated)
 
 
 class Connector(ABC):
@@ -36,6 +37,14 @@ class Connector(ABC):
 
     @abstractmethod
     def read_bytes(self, external_id: str) -> bytes: ...
+
+    @abstractmethod
+    def read_text(self, folder: str, name: str) -> str | None:
+        """Read a small text file (catalog.*.json) in `folder`; None if it does not exist."""
+
+    @abstractmethod
+    def write_text(self, folder: str, name: str, content: str) -> None:
+        """Create or replace a small text file in `folder`."""
 
     def updated_config(self) -> dict[str, Any]:
         """Config to persist after use (e.g. refreshed OAuth tokens)."""

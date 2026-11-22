@@ -3,13 +3,14 @@ import { api, downloadBlob, thumbUrl } from "../api";
 import type { Shared } from "../App";
 import type { Template } from "../types";
 
-type Scope = "selection" | "source" | "all";
+type Scope = "selection" | "source" | "folder" | "all";
 
-export default function ExportPage({ sources, selection, notify, go }: Shared) {
+export default function ExportPage({ sources, folders, selection, notify, go }: Shared) {
   const [templates, setTemplates] = useState<Template[]>([]);
   const [templateId, setTemplateId] = useState<number | "">("");
   const [scope, setScope] = useState<Scope>(selection.length ? "selection" : "all");
   const [sourceId, setSourceId] = useState<number | "">(sources[0]?.id ?? "");
+  const [folderId, setFolderId] = useState<number | "">(folders.find((f) => f.has_schema)?.id ?? "");
   const [format, setFormat] = useState<"png" | "jpg" | "webp" | "pdf">("png");
   const [pattern, setPattern] = useState("{{_stem}}");
   const [pdf, setPdf] = useState({
@@ -35,6 +36,11 @@ export default function ExportPage({ sources, selection, notify, go }: Shared) {
 
   async function resolveIds(): Promise<number[]> {
     if (scope === "selection") return selection;
+    if (scope === "folder") {
+      const f = folders.find((x) => x.id === folderId);
+      if (!f) return [];
+      return api.get<number[]>(`/api/images/ids?${new URLSearchParams({ source_id: String(f.source_id), folder: f.path })}`);
+    }
     const q = scope === "source" && sourceId ? `?source_id=${sourceId}` : "";
     return api.get<number[]>(`/api/images/ids${q}`);
   }
@@ -107,6 +113,17 @@ export default function ExportPage({ sources, selection, notify, go }: Shared) {
                   {sources.map((s) => (
                     <option key={s.id} value={s.id}>
                       {s.name} ({s.image_count})
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="check">
+                <input type="radio" checked={scope === "folder"} onChange={() => setScope("folder")} />
+                Una carpeta y sus subcarpetas
+                <select value={folderId} onChange={(e) => (setFolderId(Number(e.target.value)), setScope("folder"))}>
+                  {folders.map((f) => (
+                    <option key={f.id} value={f.id}>
+                      {sources.find((s) => s.id === f.source_id)?.name} / {f.path || "(raíz)"} {f.category ? `· ${f.category}` : ""}
                     </option>
                   ))}
                 </select>

@@ -3,6 +3,8 @@
 const PLACEHOLDER = /\{\{\s*([^{}|]+?)\s*((?:\|[^{}|]*)*)\}\}/g;
 
 export const BUILTINS = [
+  { key: "_category", label: "Categoría de la carpeta" },
+  { key: "_folder", label: "Nombre de carpeta" },
   { key: "_name", label: "Nombre de archivo" },
   { key: "_stem", label: "Nombre sin extensión" },
   { key: "_index", label: "Nº de orden" },

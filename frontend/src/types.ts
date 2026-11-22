@@ -1,14 +1,42 @@
 export type FieldType = "text" | "longtext" | "number" | "date" | "boolean" | "select";
 
-export interface MetadataField {
-  id: number;
+export interface FieldDef {
   key: string;
   label: string;
   type: FieldType;
   options: string[];
   required: boolean;
   default: string | null;
-  position: number;
+  origin?: string; // folder path whose catalog.schema.json defines it
+}
+
+/** Union of fields across all folders (for template placeholders). */
+export interface CatalogField extends FieldDef {
+  folders: string[];
+}
+
+export interface FolderSchema {
+  category: string;
+  inherit: boolean;
+  remove: string[];
+  fields: FieldDef[];
+}
+
+export interface Folder {
+  id: number;
+  source_id: number;
+  path: string;
+  name: string;
+  category: string;
+  own_schema: FolderSchema | null;
+  has_own_schema: boolean;
+  has_schema: boolean;
+  inherits_from: string | null;
+  schema_error: string | null;
+  data_error: string | null;
+  fields: FieldDef[];
+  image_count: number;
+  missing_count: number;
 }
 
 export interface ConfigField {
@@ -40,11 +68,14 @@ export interface ImageItem {
   id: number;
   source_id: number;
   name: string;
+  folder_path: string;
   external_id: string;
   width: number | null;
   height: number | null;
   meta: Meta;
   missing?: string[];
+  has_schema?: boolean;
+  category?: string;
 }
 
 interface BaseElement {

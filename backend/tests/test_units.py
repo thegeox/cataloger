@@ -76,6 +76,8 @@ def test_gdrive_pagination_and_refresh():
 
 def test_onedrive_filters_non_images():
     def handler(req: httpx.Request) -> httpx.Response:
+        if "/items/9/children" in str(req.url):
+            return httpx.Response(200, json={"value": [{"id": "4", "name": "d.jpg", "file": {"mimeType": "image/jpeg"}}]})
         if "skiptoken" in str(req.url):
             return httpx.Response(200, json={"value": [{"id": "3", "name": "c.png", "file": {"mimeType": "image/png"}}]})
         return httpx.Response(
@@ -91,4 +93,89 @@ def test_onedrive_filters_non_images():
         )
 
     c = OneDriveConnector({"access_token": "t"}, _Settings(), client=httpx.Client(transport=httpx.MockTransport(handler)))
-    assert [f.external_id for f in c.list_images()] == ["1", "3"]
+    assert [(f.external_id, f.folder) for f in c.list_images()] == [("1", ""), ("3", ""), ("4", "carpeta")]
+
+
+# --------------------------------------------------------------------------- folder files
+
+from app.models import FolderSchema  # noqa: E402
+from app.services.folder_files import SchemaFileError, parse_schema, resolve, serialize_schema  # noqa: E402
+
+
+def test_parse_schema_aliases_and_shorthand():
+    s = parse_schema('{"category": "X", "fields": [{"key": "sku", "type": "text", "required": true}, "color"]}')
+    assert s.category == "X"
+    assert [(f.key, f.type, f.required, f.label) for f in s.fields] == [("sku", "text", True, "Sku"), ("color", "text", False, "Color")]
+    assert [f.key for f in parse_schema('[{"clave": "a", "tipo": "sí_no"}]').fields] == ["a"]
+
+
+@pytest.mark.parametrize("text, msg", [
+    ("{nope", "JSON no válido"),
+    ('{"campos": [{"clave": "a b"}]}', "no válida"),
+    ('{"campos": [{"clave": "a"}, {"clave": "a"}]}', "repetido"),
+    ('{"campos": [{"clave": "a", "tipo": "foto"}]}', "desconocido"),
+])
+def test_parse_schema_errors(text, msg):
+    with pytest.raises(SchemaFileError, match=msg):
+        parse_schema(text)
+
+
+def test_schema_roundtrip_and_resolve():
+    parent = parse_schema('{"campos": [{"clave": "a"}, {"clave": "b", "tipo": "numero"}]}')
+    child = parse_schema('{"quitar": ["a"], "campos": [{"clave": "b", "etiqueta": "B!", "obligatorio": true}, {"clave": "c"}]}')
+    assert parse_schema(serialize_schema(child)) == child
+    fields = resolve(resolve(None, parent, "p"), child, "p/c")
+    assert [(f.key, f.label, f.required, f.origin) for f in fields] == [("b", "B!", True, "p/c"), ("c", "C", False, "p/c")]
+    standalone = resolve(fields, FolderSchema(inherit=False, fields=[]), "x")
+    assert standalone == []
+
+
+def test_gdrive_recursive_and_write():
+    created = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        q = req.url.params.get("q", "")
+        if req.url.path.startswith("/upload"):
+            created.append((req.method, req.url.path, req.content))
+            return httpx.Response(200, json={"id": "new"})
+        if "'root' in parents" in q and "name = 'catalog.data.json'" in q:
+            return httpx.Response(200, json={"files": []})
+        if "'sub1' in parents" in q and "name = 'catalog.data.json'" in q:
+            return httpx.Response(200, json={"files": [{"id": "d1", "name": "catalog.data.json", "mimeType": "application/json"}]})
+        if req.url.params.get("alt") == "media":
+            return httpx.Response(200, content='{"a.jpg": {"x": 1}}'.encode())
+        if "'root' in parents" in q:
+            return httpx.Response(200, json={"files": [
+                {"id": "1", "name": "a.jpg", "mimeType": "image/jpeg"},
+                {"id": "sub1", "name": "Zapatos", "mimeType": "application/vnd.google-apps.folder"},
+            ]})
+        if "'sub1' in parents" in q:
+            return httpx.Response(200, json={"files": [{"id": "2", "name": "b.jpg", "mimeType": "image/jpeg"}]})
+        return httpx.Response(404)
+
+    c = GoogleDriveConnector({"access_token": "t"}, _Settings(), client=httpx.Client(transport=httpx.MockTransport(handler)))
+    assert [(f.name, f.folder) for f in c.list_images()] == [("a.jpg", ""), ("b.jpg", "Zapatos")]
+    assert c.read_text("Zapatos", "catalog.data.json") == '{"a.jpg": {"x": 1}}'
+    assert c.read_text("", "catalog.data.json") is None
+    c.write_text("Zapatos", "catalog.data.json", "{}")  # existing -> media update
+    c.write_text("", "catalog.data.json", "{}")  # new -> multipart create in parent
+    assert created[0][:2] == ("PATCH", "/upload/drive/v3/files/d1")
+    assert created[1][:2] == ("POST", "/upload/drive/v3/files") and b'"parents": ["root"]' in created[1][2]
+
+
+def test_onedrive_text_files():
+    seen = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen.append((req.method, str(req.url)))
+        if req.method == "PUT":
+            return httpx.Response(201, json={"id": "x"})
+        if "catalog.schema.json" in str(req.url):
+            return httpx.Response(404, json={"error": {"code": "itemNotFound"}})
+        return httpx.Response(200, content=b"{}")
+
+    c = OneDriveConnector({"access_token": "t", "folder_id": "F"}, _Settings(), client=httpx.Client(transport=httpx.MockTransport(handler)))
+    assert c.read_text("Muebles/Sillas", "catalog.schema.json") is None
+    assert c.read_text("", "catalog.data.json") == "{}"
+    c.write_text("Muebles", "catalog.data.json", "{}")
+    assert seen[-1] == ("PUT", "https://graph.microsoft.com/v1.0/me/drive/items/F:/Muebles/catalog.data.json:/content")

@@ -11,6 +11,7 @@ from ..db import get_session
 from ..models import Image, Template, TemplateDefinition, utcnow
 from ..services import renderer
 from ..services.export import PdfOptions, export_pdf, export_zip
+from ..services.catalog import FieldIndex
 from ..services.placeholders import build_context
 from ..services.presets import PRESETS
 from ..services.storage import get_image_bytes, open_image
@@ -108,7 +109,9 @@ def preview(body: PreviewRequest, request: Request, session: Session = Depends(g
             raise HTTPException(404, "Imagen no encontrada")
         photo = open_image(get_image_bytes(session, request.app.state.settings, img))
         img.width, img.height = photo.size
-        ctx = build_context(img)
+        index = FieldIndex(session, img.source_id)
+        folder = index.folder(img)
+        ctx = build_context(img, meta=index.effective_meta(img), category=folder.category if folder else "")
     out = renderer.render(body.definition, photo, ctx)
     out.thumbnail((body.max_size, body.max_size))
     return Response(renderer.to_bytes(out, "png", dpi=72), media_type="image/png")

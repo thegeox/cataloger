@@ -3,15 +3,15 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 from sqlmodel import Session, func, select
 
 from ..connectors import REGISTRY, ConnectorError, get_connector
 from ..connectors.base import IMAGE_EXTENSIONS
 from ..db import get_session
-from ..models import Image, Source
-from ..services.sync import sync_source
+from ..models import Folder, Image, Source
+from ..services.catalog import sync_source
 
 router = APIRouter(prefix="/api", tags=["sources"])
 MASK = "••••••"
@@ -93,6 +93,8 @@ def delete_source(source_id: int, session: Session = Depends(get_session)):
     source = session.get(Source, source_id) or _404()
     for img in session.exec(select(Image).where(Image.source_id == source_id)):
         session.delete(img)
+    for folder in session.exec(select(Folder).where(Folder.source_id == source_id)):
+        session.delete(folder)
     session.delete(source)
     session.commit()
 
@@ -104,18 +106,27 @@ def sync(source_id: int, request: Request, session: Session = Depends(get_sessio
 
 
 @router.post("/sources/{source_id}/upload")
-async def upload(source_id: int, files: list[UploadFile], request: Request, session: Session = Depends(get_session)):
-    """Upload images from the browser into a local-folder source, then sync it."""
+async def upload(
+    source_id: int,
+    files: list[UploadFile],
+    request: Request,
+    folder: str = Form(""),
+    session: Session = Depends(get_session),
+):
+    """Upload images from the browser into a folder of a local source, then sync it."""
     source = session.get(Source, source_id) or _404()
     if source.kind != "local":
         raise HTTPException(400, "Solo se puede subir a fuentes de carpeta local")
     root = get_connector("local", source.config).root
+    target_dir = (root / folder).resolve()
+    if not target_dir.is_relative_to(root) or not target_dir.is_dir():
+        raise HTTPException(400, f"Carpeta no válida: {folder}")
     saved = []
     for f in files:
         name = Path(f.filename or "").name
         if not name or Path(name).suffix.lower() not in IMAGE_EXTENSIONS:
             continue
-        (root / name).write_bytes(await f.read())
+        (target_dir / name).write_bytes(await f.read())
         saved.append(name)
     result = sync_source(session, request.app.state.settings, source)
     return {"saved": saved, **result.__dict__}

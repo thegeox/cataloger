@@ -6,9 +6,9 @@ import io
 import unicodedata
 from dataclasses import dataclass, field
 from datetime import date
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
-from ..models import Image, MetadataField
+from ..models import FieldDef, Image
 
 TRUE_VALUES = {"1", "true", "si", "sí", "yes", "y", "x", "verdadero"}
 FALSE_VALUES = {"0", "false", "no", "n", "falso", ""}
@@ -25,7 +25,7 @@ def _norm(s: str) -> str:
     return "".join(ch for ch in s.lower() if ch.isalnum())
 
 
-def coerce_value(f: MetadataField, value: Any) -> Any:
+def coerce_value(f: FieldDef, value: Any) -> Any:
     """Convert a raw value (from JSON or CSV) to the field's type. Raises ValueError."""
     if value is None or (isinstance(value, str) and value.strip() == "" and f.type != "boolean"):
         return None
@@ -45,7 +45,7 @@ def coerce_value(f: MetadataField, value: Any) -> Any:
             n = float(s)
         except ValueError as exc:
             raise ValueError("no es un número") from exc
-        return int(n) if n.is_integer() and "." not in s else n
+        return int(n) if n.is_integer() else n  # 2.150,00 -> 2150
     if f.type == "boolean":
         if isinstance(value, bool):
             return value
@@ -79,7 +79,7 @@ def _parse_dmy(s: str) -> date:
     return date(y, m, d)
 
 
-def validate_values(fields: Iterable[MetadataField], values: dict[str, Any], *, partial: bool = False) -> dict[str, Any]:
+def validate_values(fields: Iterable[FieldDef], values: dict[str, Any], *, partial: bool = False) -> dict[str, Any]:
     by_key = {f.key: f for f in fields}
     out: dict[str, Any] = {}
     errors: dict[str, str] = {}
@@ -101,7 +101,7 @@ def validate_values(fields: Iterable[MetadataField], values: dict[str, Any], *, 
     return out
 
 
-def defaults_for(fields: Iterable[MetadataField]) -> dict[str, Any]:
+def defaults_for(fields: Iterable[FieldDef]) -> dict[str, Any]:
     out = {}
     for f in fields:
         if f.default not in (None, ""):
@@ -121,6 +121,8 @@ class ImportReport:
     unmatched_rows: list[str] = field(default_factory=list)
     unknown_columns: list[str] = field(default_factory=list)
     errors: list[dict[str, Any]] = field(default_factory=list)
+    # image id -> values to merge (not serialised in the API response)
+    updates: dict[int, dict[str, Any]] = field(default_factory=dict, repr=False)
 
 
 def _decode(data: bytes) -> str:
@@ -132,17 +134,21 @@ def _decode(data: bytes) -> str:
     return data.decode("utf-8", "replace")
 
 
+NAME_COLUMNS = ["filename", "archivo", "nombre_archivo", "file", "imagen", "image", "foto", "name", "nombre"]
+
+
 def import_csv(
     data: bytes,
     images: list[Image],
-    fields: list[MetadataField],
+    fields_for: Callable[[Image], list[FieldDef]],
     *,
     match_column: str | None = None,
     overwrite_empty: bool = False,
 ) -> ImportReport:
-    """Apply metadata from a CSV. Rows are matched to images by file name (with or without extension).
-
-    Columns are matched to fields by key or label (case/accent-insensitive). Mutates `images`.
+    """Compute metadata updates from a CSV. Rows are matched to images by file name (with or
+    without extension) or by relative path. Columns are matched to each image's folder fields by
+    key or label (case/accent-insensitive); a column that is not a field of an image's folder is
+    ignored for that image. Nothing is written: `report.updates` holds the values to apply.
     """
     text = _decode(data)
     try:
@@ -153,62 +159,66 @@ def import_csv(
     headers = reader.fieldnames or []
     report = ImportReport()
 
-    name_candidates = [match_column] if match_column else ["filename", "archivo", "nombre_archivo", "file", "imagen", "image", "name", "nombre"]
     norm_headers = {_norm(h): h for h in headers}
-    match_header = next((norm_headers[_norm(c)] for c in name_candidates if c and _norm(c) in norm_headers), None)
+    candidates = [match_column] if match_column else NAME_COLUMNS
+    match_header = next((norm_headers[_norm(c)] for c in candidates if c and _norm(c) in norm_headers), None)
     if match_header is None:
         raise ValueError(f"No se encontró la columna de nombre de archivo. Columnas: {', '.join(headers)}")
-
-    field_lookup: dict[str, MetadataField] = {}
-    for f in fields:
-        field_lookup[_norm(f.key)] = f
-        field_lookup.setdefault(_norm(f.label), f)
-    column_map: dict[str, MetadataField] = {}
-    for h in headers:
-        if h == match_header:
-            continue
-        f = field_lookup.get(_norm(h))
-        if f:
-            column_map[h] = f
-        else:
-            report.unknown_columns.append(h)
+    data_headers = [h for h in headers if h != match_header and _norm(h) not in ("carpeta", "folder")]
 
     index: dict[str, list[Image]] = {}
     for img in images:
         stem = img.name.rsplit(".", 1)[0]
-        for k in {img.name.lower(), stem.lower(), img.external_id.lower()}:
+        for k in {img.name.lower(), stem.lower(), img.external_id.lower(),
+                  (f"{img.folder_path}/{img.name}" if img.folder_path else img.name).lower()}:
             index.setdefault(k, []).append(img)
 
+    used_columns: set[str] = set()
     for line_no, row in enumerate(reader, start=2):
         key = (row.get(match_header) or "").strip().lower()
         targets = index.get(key) or index.get(key.rsplit(".", 1)[0], [])
         if not targets:
             report.unmatched_rows.append(row.get(match_header) or f"fila {line_no}")
             continue
-        values: dict[str, Any] = {}
-        row_errors: dict[str, str] = {}
-        for h, f in column_map.items():
-            raw = row.get(h)
-            if (raw is None or raw.strip() == "") and not overwrite_empty:
-                continue
-            try:
-                values[f.key] = coerce_value(f, raw)
-            except ValueError as exc:
-                row_errors[f.key] = str(exc)
-        if row_errors:
-            report.errors.append({"row": line_no, "file": row.get(match_header), "errors": row_errors})
         report.matched += 1
         for img in targets:
-            img.meta = {**(img.meta or {}), **values}
-            report.updated_images.append(img.id)
+            lookup: dict[str, FieldDef] = {}
+            for f in fields_for(img):
+                lookup[_norm(f.key)] = f
+                lookup.setdefault(_norm(f.label), f)
+            values: dict[str, Any] = {}
+            row_errors: dict[str, str] = {}
+            for h in data_headers:
+                f = lookup.get(_norm(h))
+                if f is None:
+                    continue
+                used_columns.add(h)
+                raw = row.get(h)
+                if (raw is None or raw.strip() == "") and not overwrite_empty:
+                    continue
+                try:
+                    values[f.key] = coerce_value(f, raw)
+                except ValueError as exc:
+                    row_errors[f.key] = str(exc)
+            if row_errors:
+                report.errors.append({"row": line_no, "file": img.name, "errors": row_errors})
+            if values:
+                report.updates.setdefault(img.id, {}).update(values)
+                report.updated_images.append(img.id)
+    report.unknown_columns = [h for h in data_headers if h not in used_columns]
     return report
 
 
-def export_csv(images: list[Image], fields: list[MetadataField]) -> str:
+def export_csv(images: list[Image], fields_for: Callable[[Image], list[FieldDef]]) -> str:
+    keys: list[str] = []
+    for img in images:
+        for f in fields_for(img):
+            if f.key not in keys:
+                keys.append(f.key)
     buf = io.StringIO()
     w = csv.writer(buf)
-    w.writerow(["filename", *[f.key for f in fields]])
+    w.writerow(["carpeta", "filename", *keys])
     for img in images:
         meta = img.meta or {}
-        w.writerow([img.name, *["" if meta.get(f.key) is None else meta.get(f.key) for f in fields]])
+        w.writerow([img.folder_path, img.name, *["" if meta.get(k) is None else meta.get(k) for k in keys]])
     return buf.getvalue()

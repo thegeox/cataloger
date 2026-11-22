@@ -17,6 +17,7 @@ from sqlmodel import Session
 from ..config import Settings
 from ..models import Image, TemplateDefinition
 from . import renderer
+from .catalog import FieldIndex
 from .placeholders import build_context, render_text
 from .storage import get_image_bytes, open_image
 
@@ -39,11 +40,13 @@ def render_items(
     session: Session, settings: Settings, definition: TemplateDefinition, images: list[Image]
 ) -> Iterator[tuple[Image, dict, "renderer.PILImage.Image"]]:
     count = len(images)
+    index = FieldIndex(session)
     for i, img in enumerate(images, start=1):
         photo = open_image(get_image_bytes(session, settings, img))
         if img.width is None:
             img.width, img.height = photo.size
-        ctx = build_context(img, i, count)
+        folder = index.folder(img)
+        ctx = build_context(img, i, count, index.effective_meta(img), folder.category if folder else "")
         yield img, ctx, renderer.render(definition, photo, ctx)
 
 

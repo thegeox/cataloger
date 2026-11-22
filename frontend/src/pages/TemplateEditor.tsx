@@ -540,7 +540,12 @@ function Properties({ el, onChange, onDelete, onDuplicate, fields, insertPlaceho
             </select>
             <div className="chips">
               {fields.map((f) => (
-                <button key={f.key} className="chip" onClick={() => insertPlaceholder(`{{${f.key}${filter}}}`)}>
+                <button
+                  key={f.key}
+                  className="chip"
+                  title={"folders" in f ? `Definido en: ${(f as { folders: string[] }).folders.join(", ")}` : undefined}
+                  onClick={() => insertPlaceholder(`{{${f.key}${filter}}}`)}
+                >
                   {f.label}
                 </button>
               ))}
