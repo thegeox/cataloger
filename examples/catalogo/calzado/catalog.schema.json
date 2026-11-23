@@ -1,0 +1,35 @@
+{
+  "categoria": "Calzado",
+  "campos": [
+    {
+      "clave": "modelo",
+      "etiqueta": "Modelo",
+      "tipo": "texto",
+      "obligatorio": true
+    },
+    {
+      "clave": "talla",
+      "etiqueta": "Talla",
+      "tipo": "lista",
+      "opciones": [
+        "38",
+        "39",
+        "40",
+        "41",
+        "42"
+      ],
+      "obligatorio": true
+    },
+    {
+      "clave": "precio",
+      "etiqueta": "Precio",
+      "tipo": "numero"
+    },
+    {
+      "clave": "material",
+      "etiqueta": "Material",
+      "tipo": "texto",
+      "defecto": "Cuero"
+    }
+  ]
+}
